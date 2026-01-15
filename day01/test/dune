@@ -1,0 +1,4 @@
+(executable
+ (name test_dial_solver)
+ (libraries base stdio hardcaml day01)
+ (preprocess (pps ppx_hardcaml)))

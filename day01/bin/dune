@@ -1,0 +1,4 @@
+(executables
+ (names main solve)
+ (libraries base stdio hardcaml day01)
+ (preprocess (pps ppx_hardcaml)))
