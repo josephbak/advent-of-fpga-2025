@@ -143,7 +143,7 @@ let () =
 
 ## Author
 
-[Your name here]
+Joseph Bak
 
 ## License
 

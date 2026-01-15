@@ -40,7 +40,7 @@ dune exec bin/main.exe                 # Generate Verilog
 
 ## Author
 
-[Your Name]
+Joseph Bak
 
 ## License
 
