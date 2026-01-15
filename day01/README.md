@@ -1,150 +1,48 @@
-# AoC 2025 Day 1: Safe Dial - Hardcaml Implementation
+# Day 1: Safe Dial
 
-Solution for [Advent of Code 2025 Day 1](https://adventofcode.com/2025/day/1) implemented in Hardcaml for the Jane Street FPGA Challenge.
+Dial goes 0-99 in a circle, starts at 50. You get rotation commands like `L68` (left 68 steps) or `R48` (right 48). It wraps around.
 
-## Problem Summary
+- Part 1: how many times do we land exactly on 0?
+- Part 2: how many times do we pass through 0 (including landing)?
 
-- **Dial**: Circular positions 0-99, starts at 50
-- **Input**: Sequence of rotations like `L68`, `R48` (Left/Right + distance)
-- **Wraparound**: Left from 0 → 99, Right from 99 → 0
-- **Part 1**: Count times the dial **ends** on position 0
-- **Part 2**: Count times the dial **passes through or lands** on position 0 (including during rotation)
+The tricky bit: `R1000` from position 50 wraps around 10 times and ends back at 50.
 
-### Edge Case
-`R1000` from position 50 crosses 0 exactly **10 times** and ends at 50.
+## Files
 
-## Circuit Architecture
+- `lib/dial_solver.ml` — the circuit
+- `test/test_dial_solver.ml` — simulation tests
+- `bin/main.ml` — generates Verilog
+- `bin/solve.ml` — runs circuit on an input file
 
+## The approach
+
+Hardware dividers are expensive, so I used the reciprocal multiplication trick:
 ```
-                        ┌─────────────────────────────────────┐
-  direction (1b) ──────►│                                     │
-  distance (16b) ──────►│  Combinational Logic                │
-                        │  ┌──────────┐  ┌──────────┐         │
-  position ────────────►│  │ div_100  │  │ mod_100  │         │
-                        │  └──────────┘  └──────────┘         │
-                        │        │              │             │
-                        │        ▼              ▼             │
-                        │   crossings      new_position       │──► position_reg
-                        │        │              │             │
-                        └────────┼──────────────┼─────────────┘
-                                 │              │
-                                 ▼              ▼
-                           part2_reg       part1_reg (if new_pos == 0)
+x / 100 = (x * 5243) >> 19
 ```
 
-### Key Implementation Details
+This works because 5243 ≈ 2^19 / 100. Multipliers are cheap on FPGAs (dedicated DSP blocks), and the shift is free — just wire routing.
 
-**Division by 100** (constant divisor optimization):
-```
-div_100(x) = (x × 5243) >> 19
-```
-This uses the "magic number" multiplication trick. Valid for x ∈ [0, 65535].
+For counting crossings:
+- Going right from pos by dist: `crossings = (pos + dist) / 100`
+- Going left: need to account for where 0 sits relative to current position
 
-**Crossing Count Formulas**:
-- **Right**: `crossings = ⌊(pos + dist) / 100⌋`
-- **Left**: `crossings = ⌊(dist + offset) / 100⌋` where `offset = 0` if `pos=0`, else `100-pos`
+Everything runs in one clock cycle per command.
 
-## Project Structure
+## What I'd do differently
 
-```
-aoc_day1_hardcaml/
-├── lib/
-│   ├── dial_solver.ml    # Main circuit implementation
-│   └── dune
-├── bin/
-│   ├── main.ml           # Verilog generation
-│   └── dune
-├── test/
-│   ├── test_dial_solver.ml  # Simulation testbench
-│   └── dune
-├── dune-project
-└── README.md
-```
+If I had more time:
+- Pipeline the multipliers for higher clock speeds
+- Share one multiplier across uses (trade area for latency)
 
-## Building & Running
+But for a first Hardcaml project, keeping it simple felt right.
 
-### Prerequisites
+## Build & test
 ```bash
-# Install opam and required packages
-opam install hardcaml hardcaml_waveterm base stdio ppx_hardcaml
-```
-
-### Build
-```bash
-cd aoc_day1_hardcaml
 dune build
-```
-
-### Run Tests
-```bash
 dune exec test/test_dial_solver.exe
+dune exec bin/main.exe  # outputs dial_solver.v
+dune exec bin/solve.exe -- input.txt  # run on actual input
 ```
-
-Expected output:
-```
-========================================
-AoC 2025 Day 1 - Hardcaml Testbench
-========================================
-
-=== Test: Simple movements ===
-Initial position: 50
-R50: pos=0, part1=1, part2=1
-R100: pos=0, part1=2, part2=2
-L50: pos=50, part1=2, part2=2
-R150: pos=0, part1=3, part2=4
-...
-✓ All tests passed!
-```
-
-### Generate Verilog
-```bash
-dune exec bin/main.exe
-# Creates dial_solver.v in current directory
-```
-
-## Interface
-
-### Inputs
-| Signal    | Width | Description |
-|-----------|-------|-------------|
-| `clock`   | 1     | Clock signal |
-| `clear`   | 1     | Synchronous reset (initializes position to 50) |
-| `direction` | 1   | 0 = Left, 1 = Right |
-| `distance` | 16   | Rotation distance |
-| `valid`   | 1     | Pulse high for one cycle per rotation |
-
-### Outputs
-| Signal       | Width | Description |
-|--------------|-------|-------------|
-| `position`   | 7     | Current dial position (0-99) |
-| `part1_count` | 32   | Times ended on 0 |
-| `part2_count` | 32   | Times passed through/landed on 0 |
-
-## Processing Your AoC Input
-
-To process your actual AoC input, modify `test_dial_solver.ml`:
-
-```ocaml
-let () =
-  (* Parse your input file *)
-  let input = In_channel.read_all "input.txt" in
-  let rotations = String.split input ~on:' ' |> List.filter ~f:(fun s -> not (String.is_empty s)) in
-  let (_, p1, p2) = run_test rotations in
-  printf "Part 1: %d\n" p1;
-  printf "Part 2: %d\n" p2
-```
-
-## Design Rationale
-
-1. **Single-cycle processing**: Each rotation command is processed in one clock cycle
-2. **Synthesizable arithmetic**: Division by 100 uses multiplier + shift instead of hardware divider
-3. **Clean FSM**: Uses Hardcaml's `Always` DSL for readable sequential logic
-4. **Parameterized widths**: Distance supports up to 65535, easily adjustable
-
-## Author
 
 Joseph Bak
-
-## License
-
-MIT
